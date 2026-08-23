@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Lenovo Hunter",
+    "slug": "lenovo-hunter",
+    "version": "1",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "backgroundColor": "#0B0D10",
+    "icon": "./assets/icon.png",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0B0D10"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "android": {
+      "package": "hr.mantra.lenovohunter",
+      "versionCode": 1,
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#12161E",
+        "monochromeImage": "./assets/adaptive-icon.png"
+      },
+      "permissions": [
+        "INTERNET",
+        "POST_NOTIFICATIONS",
+        "VIBRATE",
+        "WAKE_LOCK"
+      ]
+    },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#F59E0B"
+        }
+      ]
+    ]
+  }
+}

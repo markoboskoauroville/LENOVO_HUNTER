@@ -1,0 +1,15 @@
+<!-- Lenovo Hunter launcher icon.
+     108 viewport · 72 mask · 42 symbol box (33…75 on both axes).
+     MANTRA_MANIFEST/modules/app-icon.md §2.
+     One shape: a hunter's reticle. Gold #E8B15C on near-black #12161E,
+     contrast ratio 9.38 — measured, and the pairing that survives 48 px. -->
+<svg xmlns="http://www.w3.org/2000/svg" width="108" height="108" viewBox="0 0 108 108">
+  <rect width="108" height="108" fill="#12161E"/>
+  <g stroke="#E8B15C" fill="none" stroke-linecap="round">
+    <!-- ring: painted outer edge lands on 42, so the path is inset by half the stroke -->
+    <circle cx="54" cy="54" r="17.5" stroke-width="4"/>
+    <!-- crosshairs, ending inside the box -->
+    <path d="M54 33 V44 M54 64 V75 M33 54 H44 M64 54 H75" stroke-width="4"/>
+  </g>
+  <circle cx="54" cy="54" r="4" fill="#E8B15C"/>
+</svg>

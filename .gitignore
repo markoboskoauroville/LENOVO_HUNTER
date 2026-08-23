@@ -1,0 +1,8 @@
+node_modules/
+.expo/
+.node-build/
+scripts/_parse.generated.mjs
+dist/
+*.apk
+.secret/
+*.log

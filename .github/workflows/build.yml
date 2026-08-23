@@ -1,0 +1,118 @@
+name: build
+
+# The APK is built here and nowhere else, so the filename, the tag and the
+# version the app shows cannot drift from each other.
+# MANTRA_MANIFEST/modules/versioning.md §3, §6.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Publish a GitHub release for this build'
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    name: verify
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+
+      # One whole number, read from the one place it is written.
+      - id: v
+        run: |
+          V=$(node -e "console.log(require('fs').readFileSync('src/version.js','utf8').match(/VERSION = (\d+)/)[1])")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          echo "building v$V"
+
+      # Structure, agreement, dead ends, secrets — and TEST 1 inside it.
+      # A red verify stops the build before it spends fifteen minutes on Gradle.
+      - name: verify
+        run: npm run verify
+
+  build:
+    name: apk
+    needs: verify
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.verify.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 17
+
+      - run: npm ci
+
+      # Generate the native project. It is not committed: it is derived, and a
+      # committed android/ folder is a second place for the version to be wrong.
+      - name: prebuild
+        run: npx expo prebuild --platform android --no-install
+
+      - name: gradle assembleRelease
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease --no-daemon --stacktrace
+
+      # The build produces the name; hands do not. Both ends carry the same
+      # number, and the job fails if they ever could not.
+      - name: name the artefact
+        id: apk
+        run: |
+          SRC=android/app/build/outputs/apk/release/app-release.apk
+          test -f "$SRC" || { echo "no APK at $SRC"; find android/app/build/outputs -name '*.apk'; exit 1; }
+          OUT="${VERSION}-lenovo-hunter-v${VERSION}.apk"
+          cp "$SRC" "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          ls -la "$OUT"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.apk.outputs.path }}
+          path: ${{ steps.apk.outputs.path }}
+          retention-days: 30
+
+      - name: publish release v${{ env.VERSION }}
+        if: github.event_name == 'push' || inputs.release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="v${VERSION}"
+          # Never tag a release "latest" — the tag IS the version number. §5
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" "${{ steps.apk.outputs.path }}" \
+            --title "Lenovo Hunter $TAG" \
+            --notes "Built from ${GITHUB_SHA:0:7}. Signed with the Android debug key — installs and upgrades, not for Play."
+
+          # Only the last two builds stay. §4 — and the cost, said plainly:
+          # the compiled artefact of anything older is gone for good. The tag
+          # and the source survive; the APK does not.
+          KEEP=2
+          gh release list --limit 50 --json tagName,createdAt \
+            | node -e "
+              let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{
+                const r=JSON.parse(s).sort((a,b)=>new Date(b.createdAt)-new Date(a.createdAt));
+                r.slice($KEEP).forEach(x=>console.log(x.tagName));
+              });" | while read -r OLD; do
+                echo "pruning $OLD"
+                gh release delete "$OLD" --yes --cleanup-tag || true
+              done
