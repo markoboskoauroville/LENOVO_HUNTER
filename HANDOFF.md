@@ -77,6 +77,32 @@ Reticle, one shape, gold `#E8B15C` on near-black `#12161E` — contrast 9.38. Me
 `app-icon.md` §3: **symbol ÷ visible circle = 0.587**, inside the 0.55–0.60 band and beside Google
 Cloud's 0.579. Source in `assets/icon-source.svg`; the generator prints the ratio and the verdict.
 
+## The build
+
+`.github/workflows/build.yml`. Two jobs. **verify** runs `npm ci`, `npm run verify` (structure,
+agreement, dead ends, secrets, TEST 1) and then bundles the JavaScript with `expo export` — 42
+seconds. **apk** prebuilds the native project, runs `assembleRelease`, names the file from the
+version constant, uploads it and publishes the release — 619 seconds, almost all of it Gradle
+compiling the New Architecture from source on a cold cache.
+
+The bundle step exists because of what the first run cost. It failed at **71.7 % of the release
+bundle**: `expo-av` imports `expo-asset` and nothing installs it for you. Eight minutes of Gradle to
+learn about one missing peer dependency. Metro answers the same question in eighteen seconds, so it
+is now asked first — and the fix was proven locally, 804 modules bundled, before it was pushed.
+
+**v1 shipped, and the artefact was checked rather than assumed.** Downloaded from the release and
+opened: 896 entries, 61.5 MB, package `hr.mantra.lenovohunter`, `versionName` 1, INTERNET and
+POST_NOTIFICATIONS in the manifest, the 1.57 MB Hermes bundle at `assets/index.android.bundle`,
+native libraries for all four ABIs, `alarm.wav` present (renamed to `res/Xi.wav` by the resource
+shrinker), and an APK Signing Block at offset 64469900.
+
+**Signed with the Android debug key**, which is what Expo's template does for `release` when no
+release keystore is configured. It installs, and because the template's debug keystore is fixed
+rather than generated per machine, v2 will install *over* v1 rather than being refused. It is not
+suitable for Play, and a real upload key is a decision to make once and store as a repository
+secret — not something to generate in the workflow, which would change the signature on every build
+and break exactly the upgrade path §4 depends on.
+
 ## Version
 
 v1. `src/version.js` is the only place the number is written; `app.json` carries `version: "1"` and
