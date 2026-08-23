@@ -43,6 +43,17 @@ jobs:
       - name: verify
         run: npm run verify
 
+      # Bundle the JavaScript exactly as Gradle's createBundleReleaseJsAndAssets
+      # will. This exists because the first build spent eight minutes on Gradle
+      # to discover that expo-av needs expo-asset and nothing installs it for
+      # you — a missing peer dependency, found at 71.7% of the bundle. Metro
+      # answers the same question in thirty seconds, so it is asked here first.
+      - name: bundle
+        run: |
+          npx expo export --platform android --output-dir dist-check
+          test -s dist-check/metadata.json
+          rm -rf dist-check
+
   build:
     name: apk
     needs: verify

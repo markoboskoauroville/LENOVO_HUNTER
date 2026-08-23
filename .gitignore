@@ -6,3 +6,4 @@ dist/
 *.apk
 .secret/
 *.log
+dist-check/
