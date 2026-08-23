@@ -1,138 +1,133 @@
-# HANDOFF — Lenovo Hunter v1
+# HANDOFF — Tablet Hunter v2
 
-**Written 22.8.2026, at the end of the session that built it. Everything below was measured, not
-assumed. Where it says measured, somebody made the request and read the answer.**
+**Written 23.8.2026. Everything below was measured against the live web and the live Groq API, not
+assumed.**
 
 ---
 
-## What was measured, and what each shop actually did
+## What v2 is, and why v1 had to be replaced
 
-Two runs against the live web on 22.8.2026 — first with `curl` and desktop headers, then with the
-real adapter classes through `npm run probe`. Both agreed.
+v1 read the HTML a server sends and guessed. It reported **Alternate.de: IN STOCK, €219,90** for a
+Legion Tab. There is no Legion Tab at €219,90 — that was a **HYTE Y70 PC tower case** that happened
+to match a search for "Y700". It reported Proshop in stock too; that was a **Wozinsky tempered glass
+screen protector at €10,03**. The app would have said both out loud.
 
-| Shop | Region | Answered | What it means |
+v2 does three things in order, and only the third may say IN STOCK.
+
+| Tier | What it is | What it may claim |
+|---|---|---|
+| **FETCH** | plain HTTP, JSON-LD and markup | IN STOCK only from a **pinned product page** with a real schema.org offer |
+| **BROWSER** | the page rendered in a real WebView with a Chrome user agent, read after its scripts ran | never IN STOCK — it reports and defers |
+| **VISION** | the rendered page photographed while scrolling, judged by a Groq vision model | IN STOCK, with a price, if it can see the product |
+
+The escalation can only ever **reduce** a claim. Nothing promotes a guess.
+
+## The three tablets
+
+| | Legion Y700 Gen 3 | iPlay 70 mini Ultra | Ultra Pad 13 |
 |---|---|---|---|
-| HGSPOT | HR | **200**, server-rendered, JSON-LD present | the friendliest of the fourteen |
-| Links.hr | HR | **200**, 558 KB, **no products in it** | nopCommerce, results rendered client-side |
-| Sancta Domenica | HR | **403**, Cloudflare `cf_chl_opt` | also redirects to bigbang.hr |
-| Mikronis | HR | **404** | the shipped search path is a guess and it is wrong |
-| Instar Informatika | HR | **503 after 15.3 s** | slow or refusing; either way it times out |
-| Nabava.net | HR | **404** / **503** on two runs | the shipped search path is a guess |
-| Amazon.de / .it / .es | DE, EU | **Akamai interstitial**, `bm-verify` proof-of-work | not fetchable, by design |
-| Cyberport | DE | **403** | first run was blocked by the build machine's own egress, second was a real 403 |
-| Alternate.de | DE | **200**, 172 KB server-rendered | works |
-| Computeruniverse | DE | **403** | as Cyberport |
-| Geizhals.de | DE | **200** on the first run, **403** on the second | rate-limited after a handful of requests |
-| Proshop | EU | **200**, but Cloudflare is in front of it | works today; may not tomorrow |
+| screen | 8.8" 2560×1600 144Hz | 8.8" 2560×1600 144Hz | 12.95" 2880×1840 144Hz |
+| chip | Snapdragon 8s Gen 3 | Snapdragon 7+ Gen 3 | Snapdragon 7+ Gen 3 |
+| RAM | 12 GB | 12 GB (20 GB version) | 24 GB (12 physical + 12 virtual) |
+| battery | 6550 mAh, 68 W | 7300 mAh, 20 W | 15000 mAh, 33 W |
+| seen at | €400–600 | €270–350 | €270–330 |
 
-**The headline: nine of fourteen refuse a plain request.** That is not a defect in this app and no
-amount of cleverness changes it. It is why BLOCKED is a first-class state with its own colour and its
-own button rather than an error, and why the shops that do answer are worth pinning properly.
+**The naming trap, written into the Ultra Pad's prompt on purpose:** ALLDOCUBE sell it as *Ultra Pad*
+but Google Play and the certification papers call it *iPlay 70 Ultra*. Same tablet. A judge that does
+not know that calls one of the two names a wrong_variant.
 
-## The bug the live run found, and the guard that came out of it
+## The finding that reshaped the target lists
 
-The first probe reported **HGSPOT: IN_STOCK, no price** and **Alternate.de: IN_STOCK, €219,90**.
+A real Chromium rendered the Croatian chains with a Chrome user agent and waited for their JavaScript
+to finish. **Neither tablet is stocked by any of them.** Links.hr's search matched 31 tablets and not
+one was a Y700 — the vision model read the page and named a Lenovo Tab K11 Plus and some Samsungs.
+Mikronis and Nabava returned 404 for every search path tried.
 
-Both were false. A Y700 Gen 3 is not €219,90 — that was some other tablet on a search page that also
-happened to mention "Y700" somewhere and contained stock wording. The app would have played the tone
-and spoken *"LENOVO IN STOCK - Alternate.de - €219,90"* out loud.
+These are China-market devices that reach Europe through importers and Amazon marketplace sellers. So
+the target lists are now **per product** and led by Amazon.de/it/es, Giztop, AliExpress, Trading
+Shenzhen and the ALLDOCUBE store, with the Croatian chains kept as a long shot.
 
-So `StoreScraper.guard()` now has the last word on every result, and IN_STOCK must be earned:
+## Groq: three traps, all measured on 23.8.2026
 
-- **a price, always** — stock wording with no number is not a purchase
-- **a pinned product URL**, unless the shop is an aggregator whose whole page is a list of offers
+**1. The vision models everyone's example uses are gone.** `meta-llama/llama-4-scout-17b-16e-instruct`
+and `llama-4-maverick` both return **404, does not exist**. The catalogue on these keys is thirteen
+models and the one that can see is **`qwen/qwen3.6-27b`**. `openai/gpt-oss-120b` refuses an image
+outright: *"messages[0].content must be a string"*.
 
-Everything else downgrades to UNKNOWN with the reason on the card. A missed alert costs one refresh.
-A false one at three in the morning costs trust in every alert after it.
+**2. `reasoning_effort: 'none'` is not a tidiness preference.** On one shop screenshot qwen spent
+**1900 completion tokens** reasoning its way to a one-line verdict. With reasoning off it spent
+**53** and gave the same answer. The free tier's limit is **8000 tokens per minute**, so the thinking
+version exhausts it after two images and every key looks throttled. Deciding what is in a photograph
+is perception, not deduction.
+
+**3. `json_validate_failed` arrives as HTTP 400** — which reads like a malformed request and is
+nothing of the kind. It means the model was still reasoning when `max_completion_tokens` ran out, so
+no JSON was ever emitted and `failed_generation` comes back empty. The fix is a **higher ceiling**,
+not a corrected prompt. `client.js` retries once at 3× before giving up.
+
+**The ring works.** Five keys, all 200 on `/models`. A live run hit a 429 with `retry-after: 14`, and
+the ring rested that key and rolled forward to the next **invisibly** — the caller saw one answer,
+slightly later. 429 never condemns. 401/403 does.
+
+## TEST 2 — the whole pipeline, live
+
+Real Chromium, Chrome UA, cookie wall dismissed, DOM read after scripts, screenshots while scrolling,
+each one judged by the shipped prompt at temperature 0.
+
+```
+Lenovo Legion Tab Y700 Gen 3
+  Alternate.de   wrong_product  saw: HYTE V70 Snow White, Tower-Gehäuse      12.9s
+  Proshop        accessory      saw: Wozinsky Tab Tempered Glass ... €10,03   6.5s
+  HGSPOT         not_found      "no products found"                          9.0s
+  Links.hr       wrong_product  saw: Lenovo Tab K11 Plus, Samsung Galaxy     16.4s
+  Giztop         blocked_page   Cloudflare CAPTCHA                            6.1s
+
+ALLDOCUBE iPlay 70 mini Ultra
+  Giztop         MATCH  €349.00  IN STOCK  saw: ALLDOCUBE iPLAY 70 MINI ULTRA  5.5s
+  Alternate.de   wrong_product  saw: Alphacool Core 70 Tube Reservoir        12.8s
+  Proshop        unclear        every key throttled at that moment            6.1s
+  Links.hr       not_found      "Nisu pronađeni proizvodi"                   10.8s
+```
+
+**Every single one of v1's false positives is now correctly rejected, and the first true match in the
+project's life is on the board.** Note the second row of the ALLDOCUBE block: a search for
+"Alldocube iPlay 70" on Alternate returned an **Alphacool water cooling reservoir**. That is the trap
+this app exists to survive.
+
+## The verifier caught itself
+
+`npm run verify` PASS 2 used to match target definitions with a regex. When the targets moved into a
+helper function the regex stopped matching and the pass printed **"3 shops, 0 regions, all known"** —
+a green tick for a check that examined nothing. It now imports the real modules through
+`scripts/_nodebuild.js` (with Node shims for expo-crypto, AsyncStorage and react-native) and counts
+real objects: **3 products, 37 shops, 7 verdicts, 15 spec rows × 3, 0 gaps.**
+
+It then produced a false hit of its own, complaining that verdict "match" mapped to UNKNOWN. It does,
+because the sample fed it had `in_stock: null`, and a match with no readable availability is not
+stock. The check was wrong, not the code. Both are recorded in `verify.js` where they happened.
 
 ## The four tests
 
-**TEST 1 — the mechanism, alone.** `npm run test:parse`. **42 passed, 0 failed.** Prices in five
-formats, the German `429,-` shorthand, both thousands conventions, the floor and ceiling and one
-either side of each, malformed JSON-LD, `@graph` nesting, `AggregateOffer`, and a breadcrumb block
-that must not win over the product block.
+1. **The mechanism** — `npm run test:parse`, **42 passed, 0 failed**, including the collision that
+   earns its keep: *"Nema na zalihi"* contains *"na zalihi"*, and *"nicht lieferbar"* contains
+   *"lieferbar"*. Deliberately reversed to watch it go red at 38/4.
+2. **The real thing** — the table above, plus five real keys against `/models` and two real vision
+   calls on the screenshots that caught v1.
+3. **The ugly cases** — supplied by the web: 403, 404, 503, a 15-second hang, a Cloudflare challenge,
+   an Akamai proof-of-work page, a 429 mid-run, a 400 that was a truncation.
+4. **The upgrade** — v1 → v2 **not run**. The storage keys moved from `lh.*.v1` to `lh.*.v2` because
+   their shape changed from one product to three; the v1 keys are left in place and ignored rather
+   than migrated, so a v1 install loses its pinned URLs and its OFF list. That is a deliberate,
+   one-time cost and it is the thing to check first on a device that had v1.
 
-The case that earns its keep: **"Nema na zalihi" contains "na zalihi"**, and "nicht lieferbar"
-contains "lieferbar". A positive-first scan calls every sold-out page in Croatia and Germany in
-stock. Negatives are therefore tested first, and **that ordering was deliberately reversed to confirm
-the suite goes red: 38 passed, 4 failed, exactly the four collision cases.** A test never seen to
-fail is a rumour.
+## What is still untested
 
-**TEST 2 — the real thing.** `npm run probe`, all fourteen adapters, live. Results in the table
-above. After the guard: `UNKNOWN: 3 · BLOCKED: 9 · ERROR: 2`, and no false IN_STOCK.
-
-**TEST 3 — the ugly cases.** Exercised for real rather than simulated, because the web supplied them:
-403 (four shops), 404 (two), 503 (two), a 15-second hang ended by the deadline, a Cloudflare
-challenge page, an Akamai proof-of-work page, and malformed JSON-LD. In every one the sweep completed
-and the other shops were unaffected.
-
-**TEST 4 — the upgrade.** *Not run. There is no previous version.* When v2 ships, the things that
-will already be on the device are the AsyncStorage keys `lh.disabled.v1`, `lh.overrides.v1`,
-`lh.last.v1`, `lh.sort.v1` — bump the suffix only if a meaning changes, and remember Android reports
-a forgotten `versionCode` bump as *app not installed*, which mentions nothing about versions.
-
-## The icon
-
-Reticle, one shape, gold `#E8B15C` on near-black `#12161E` — contrast 9.38. Measured against
-`app-icon.md` §3: **symbol ÷ visible circle = 0.587**, inside the 0.55–0.60 band and beside Google
-Cloud's 0.579. Source in `assets/icon-source.svg`; the generator prints the ratio and the verdict.
-
-## The build
-
-`.github/workflows/build.yml`. Two jobs. **verify** runs `npm ci`, `npm run verify` (structure,
-agreement, dead ends, secrets, TEST 1) and then bundles the JavaScript with `expo export` — 42
-seconds. **apk** prebuilds the native project, runs `assembleRelease`, names the file from the
-version constant, uploads it and publishes the release — 619 seconds, almost all of it Gradle
-compiling the New Architecture from source on a cold cache.
-
-The bundle step exists because of what the first run cost. It failed at **71.7 % of the release
-bundle**: `expo-av` imports `expo-asset` and nothing installs it for you. Eight minutes of Gradle to
-learn about one missing peer dependency. Metro answers the same question in eighteen seconds, so it
-is now asked first — and the fix was proven locally, 804 modules bundled, before it was pushed.
-
-**v1 shipped, and the artefact was checked rather than assumed.** Downloaded from the release and
-opened: 896 entries, 61.5 MB, package `hr.mantra.lenovohunter`, `versionName` 1, INTERNET and
-POST_NOTIFICATIONS in the manifest, the 1.57 MB Hermes bundle at `assets/index.android.bundle`,
-native libraries for all four ABIs, `alarm.wav` present (renamed to `res/Xi.wav` by the resource
-shrinker), and an APK Signing Block at offset 64469900.
-
-**Signed with the Android debug key**, which is what Expo's template does for `release` when no
-release keystore is configured. It installs, and because the template's debug keystore is fixed
-rather than generated per machine, v2 will install *over* v1 rather than being refused. It is not
-suitable for Play, and a real upload key is a decision to make once and store as a repository
-secret — not something to generate in the workflow, which would change the signature on every build
-and break exactly the upgrade path §4 depends on.
-
-## Version
-
-v1. `src/version.js` is the only place the number is written; `app.json` carries `version: "1"` and
-`versionCode: 1`, and `npm run verify` fails if the three ever disagree. APK name derives from the
-constant: `1-lenovo-hunter-v1.apk`.
-
-## What to do first, in order
-
-1. `npm install && npx expo install --fix`
-2. `npm run verify` — expect GREEN
-3. `npm run probe` — see for yourself which shops answer today
-4. **Pin product URLs** in ⚙ for HGSPOT, Links.hr and Alternate.de at minimum. Until then the app is
-   honest but nearly silent, which is the correct behaviour and not a bug.
-5. Fix the two guessed search paths — Mikronis and Nabava.net both 404. Find the real ones in a
-   browser and put them in `src/config/targets.js`.
-
-## What is not tested and not built
-
-- **Background sweeping while the app is closed.** Not implemented. `expo-background-task` is in
-  package.json and nothing registers a task, deliberately: Android's minimum is about 15 minutes and
-  it is not honoured under Doze. Written down rather than half-built, because a half-built background
-  sweep looks like a working one until the day it matters.
-- **iOS.** Nothing tried.
-- **The notification, the tone and the spoken line have never fired on a device**, because no shop
-  reported real stock during the build. The path is wired and `announceMany` is called from the
-  sweep, but *this is the single largest untested thing in the project.* Test it by hand: set a
-  shop's previous status to OUT_OF_STOCK in storage, pin a URL to something in stock, and sweep.
-- **Cyberport and Computeruniverse** were unreachable from the build machine on the first run for a
-  reason that had nothing to do with them — the sandbox's own egress policy. Their second-run 403 is
-  real, but they deserve one honest attempt from the phone before you believe it.
-- **Geizhals rate-limits.** It answered 200 and then 403 within ten minutes. It is the most valuable
-  target of the fourteen — when it lists the product it lists every German shop's price — so it is
-  worth pinning a direct product URL and sweeping it gently rather than often.
+- **The WebView screenshot path has never run on a device.** `react-native-view-shot` capturing a
+  `WebView` is the single riskiest thing in this build. The pipeline is proven — the same steps in
+  Playwright produce the verdicts above — but Playwright's screenshot and Android's `captureRef` are
+  not the same code. If the shots come back null the cards will say so and fall back to BROWSER tier
+  rather than lying.
+- **The notification, tone and spoken line still have never fired on a device.**
+- **Background sweeping while the app is closed** is still not implemented, deliberately.
+- **Amazon** remains fetch-blocked by Akamai and is left as OPEN-in-browser. Keepa or the Product
+  Advertising API is the supported path and drops in behind the same adapter interface.

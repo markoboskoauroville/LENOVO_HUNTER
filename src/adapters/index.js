@@ -1,6 +1,4 @@
 import { StoreScraper, ChallengedStore } from '../core/StoreScraper';
-import { TARGETS } from '../config/targets';
-import { PRODUCT } from '../config/product';
 import { HgspotScraper } from './hr/hgspot';
 import { LinksScraper } from './hr/links';
 import { NabavaScraper } from './hr/nabava';
@@ -9,7 +7,7 @@ import { AlternateScraper } from './de/alternate';
 import { ProshopScraper } from './eu/proshop';
 
 // Adapters that need more than the default cascade. Everything not named here
-// gets the base class, which is the point of the base class.
+// gets the base class, which is the point of having a base class.
 const SPECIAL = {
   hgspot: HgspotScraper,
   links: LinksScraper,
@@ -20,18 +18,25 @@ const SPECIAL = {
 };
 
 /**
- * Build the live adapter list.
- * @param {Object} overrides  { [storeId]: { productUrl } } — pinned by Marko,
- *                            persisted, and always beating the shipped default.
+ * Build the adapters for ONE product. The target list belongs to the product,
+ * not to the app — the two tablets are sold in different places, and pretending
+ * otherwise is how you end up asking a Croatian PC chain for a Chinese tablet
+ * fourteen times a day.
+ *
+ * @param product    from config/products
+ * @param overrides  { [storeId]: { productUrl } } — pinned, persisted, and
+ *                   always beating the shipped default
  */
-export function buildScrapers(overrides = {}) {
-  return TARGETS.map((t) => {
-    const cfg = { ...t, modelHints: PRODUCT.hints, ...(overrides[t.id] || {}) };
+export function buildScrapers(product, overrides = {}) {
+  const ov = overrides[product.id] || {};
+  return product.targets.map((t) => {
+    const cfg = { ...t, modelHints: product.hints, ...(ov[t.id] || {}) };
     if (cfg.productUrl) cfg.buyUrl = cfg.productUrl;
-    // A pinned product URL beats a known challenge: if he found the page in a
-    // browser, it is worth one honest attempt before giving up on the shop.
-    if (t.kind === 'challenged' && !cfg.productUrl) return new ChallengedStore(cfg);
-    if (t.kind === 'challenged') return new ChallengedStore({ ...cfg, probe: true });
+    else cfg.buyUrl = t.searchUrl;
+
+    // A challenged shop with a pinned URL still gets one honest attempt: if he
+    // found the page in a browser, it is worth asking once before giving up.
+    if (t.kind === 'challenged') return new ChallengedStore({ ...cfg, probe: !!cfg.productUrl });
     const Cls = SPECIAL[t.id] || StoreScraper;
     return new Cls(cfg);
   });

@@ -9,6 +9,15 @@ export const Stock = {
   PENDING:      'PENDING',   // not asked yet this sweep
 };
 
+// How a result was arrived at. Shown on the card, because "a fetch guessed" and
+// "a browser rendered it and a vision model read it" are not the same claim and
+// must never look the same on screen.
+export const Tier = {
+  FETCH:   'FETCH',    // plain HTTP, JSON-LD or markup
+  BROWSER: 'BROWSER',  // rendered in a real browser, DOM read after scripts ran
+  VISION:  'VISION',   // rendered, photographed, and judged by a vision model
+};
+
 export const Region = {
   HR: 'HR',
   DE: 'DE',

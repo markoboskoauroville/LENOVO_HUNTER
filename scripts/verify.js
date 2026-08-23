@@ -44,7 +44,7 @@ console.log('PASS 1  structure');
     else checked++;
     if (appJson.expo.android.versionCode !== n) bad(`android.versionCode is ${appJson.expo.android.versionCode}, VERSION is ${n}`);
     else checked++;
-    if (!version.includes(`${n}-lenovo-hunter-v${n}`) && !version.includes('${VERSION}-lenovo-hunter-v${VERSION}')) {
+    if (!version.includes('${VERSION}-tablet-hunter-v${VERSION}')) {
       bad('APK_NAME is not derived from VERSION at both ends');
     } else checked++;
   }
@@ -76,46 +76,95 @@ console.log('PASS 1  structure');
 /* ---------------------------------------------------- 2  agreement ------- */
 console.log('\nPASS 2  agreement');
 {
-  const types = read('src/core/types.js');
-  const atoms = read('src/ui/atoms.js');
-  const hunt = read('src/core/hunt.js');
+  // Load the REAL modules, not their source text. The previous version of this
+  // pass matched target definitions with a regex; when the targets moved into a
+  // helper function on 23.8.2026 the regex stopped matching and the pass
+  // reported "3 shops, 0 regions, all known" — a green tick for a check that
+  // examined nothing. Print the count, and treat a zero as a broken check.
+  const { build } = require('./_nodebuild');
+  const out = build(root);
+  const load = (p) => require('node:url').pathToFileURL(path.join(out, p)).href;
 
-  // Scope to the Stock block only. The first version of this check matched
-  // every two-space UPPER key in the file and reported Region.HR/DE/EU as
-  // statuses with no card face — six hits, all false. Most sweep hits are
-  // false; confirm each one against the source before believing it.
-  const stockBlock = (types.match(/export const Stock = \{([\s\S]*?)\};/) || [, ''])[1];
-  const statuses = [...stockBlock.matchAll(/^\s{2}([A-Z_]+):\s+'/gm)].map((m) => m[1]);
-  if (statuses.length === 0) bad('found 0 statuses in types.js — the check did not run');
-  else {
-    let missingFace = 0, missingRank = 0;
+  (async () => {
+    const types = await import(load('core/types.mjs'));
+    const products = await import(load('config/products.mjs'));
+    const verify = await import(load('core/groq/verify.mjs'));
+    const pipeline = await import(load('core/pipeline.mjs'));
+    const atoms = read('src/ui/atoms.js');
+    const hunt = read('src/core/hunt.js');
+
+    const statuses = Object.keys(types.Stock);
+    if (!statuses.length) bad('0 statuses — the check did not run');
+    let faces = 0, ranks = 0;
     statuses.forEach((s) => {
-      if (!atoms.includes(`[Stock.${s}]`)) { bad(`Stock.${s} has no entry in STATUS_FACE — its card would draw nothing`); missingFace++; }
-      if (!hunt.includes(`[Stock.${s}]`)) { bad(`Stock.${s} has no rank in STATUS_RANK — it would sort last silently`); missingRank++; }
+      if (atoms.includes(`[Stock.${s}]`)) faces++; else bad(`Stock.${s} has no STATUS_FACE — its card would draw nothing`);
+      if (hunt.includes(`[Stock.${s}]`)) ranks++; else bad(`Stock.${s} has no STATUS_RANK — it would sort last, silently`);
     });
-    ok(`statuses: ${statuses.length} checked, ${statuses.length - missingFace} have a face, ${statuses.length - missingRank} have a rank`);
-  }
+    ok(`statuses: ${statuses.length} checked, ${faces} have a face, ${ranks} have a rank`);
 
-  // Every target must carry the fields the runner reads.
-  const targets = read('src/config/targets.js');
-  const ids = [...targets.matchAll(/id:\s*'([a-z0-9]+)'/g)].map((m) => m[1]);
-  if (ids.length === 0) bad('found 0 targets — the check did not run');
-  else {
-    const dupes = ids.filter((v, i) => ids.indexOf(v) !== i);
-    if (dupes.length) bad(`duplicate target ids: ${dupes.join(', ')} — one would overwrite the other in every by-id map`);
-    const kinds = [...targets.matchAll(/kind:\s*'([a-z]+)'/g)].map((m) => m[1]);
-    const unknown = kinds.filter((k) => !['generic', 'challenged'].includes(k));
-    if (unknown.length) bad(`unknown target kind: ${unknown.join(', ')}`);
-    ok(`targets: ${ids.length} shops, ${new Set(ids).size} unique ids, ${kinds.length} kinds all known`);
-  }
+    // Every verdict the vision model may return must map to a stock state.
+    // The first version of this check fed every verdict `in_stock: null` and
+    // then complained that "match" mapped to UNKNOWN. It does, and it is right
+    // to: a match with no readable availability is not stock. The check was
+    // wrong, not the code. Most sweep hits are false — confirm each against the
+    // source before believing it. four-tests.md, the sweep.
+    const verdicts = Object.values(verify.Verdict);
+    const sample = (v) => v === 'match'
+      ? { verdict: v, in_stock: true, price_eur: 349 }
+      : { verdict: v, in_stock: null, price_eur: null };
+    let mapped = 0;
+    verdicts.forEach((v) => {
+      const r = pipeline.verdictToStock(sample(v));
+      const settled = r && r.status && (r.status !== types.Stock.UNKNOWN || v === 'unclear');
+      if (settled) mapped++;
+      else bad(`verdict "${v}" falls through to UNKNOWN — a real answer would look like a failure`);
+    });
+    // And the one that matters most: a match must be able to become IN_STOCK.
+    const m = pipeline.verdictToStock({ verdict: 'match', in_stock: true, price_eur: 349 });
+    if (m.status !== types.Stock.IN_STOCK || m.price !== 349) bad('a confirmed match does not become IN_STOCK — the alert would never fire');
+    const noPrice = pipeline.verdictToStock({ verdict: 'match', in_stock: true, price_eur: null });
+    if (noPrice.status === types.Stock.IN_STOCK) bad('a match with no price becomes IN_STOCK — v1\'s bug, back again');
+    ok(`verdicts: ${verdicts.length} checked, ${mapped} map to a stock state`);
+    verdicts.forEach((v) => {
+      if (!verify.RANK || verify.RANK[v] === undefined) bad(`verdict "${v}" has no RANK — bestVerdict would sort it last`);
+    });
 
-  const regions = [...targets.matchAll(/region:\s*Region\.([A-Z]+)/g)].map((m) => m[1]);
-  const known = ['HR', 'DE', 'EU'];
-  const strays = regions.filter((r) => !known.includes(r));
-  if (strays.length) bad(`region with no section on screen: ${strays.join(', ')}`);
-  ok(`regions: ${regions.length} assignments, all in REGION_ORDER`);
+    // Products, their targets, and their spec sheets.
+    const ps = products.PRODUCTS;
+    if (!ps || ps.length < 2) bad(`${ps ? ps.length : 0} products — the check did not run`);
+    let shops = 0, dupes = 0, badRegion = 0, missingSpec = 0;
+    const regions = Object.values(types.Region);
+    ps.forEach((p) => {
+      if (!p.targets || !p.targets.length) bad(`${p.id} has no targets`);
+      const ids = (p.targets || []).map((t) => t.id);
+      shops += ids.length;
+      const d = ids.filter((v, i) => ids.indexOf(v) !== i);
+      if (d.length) { dupes++; bad(`${p.id}: duplicate target ids ${d.join(', ')} — one overwrites the other in every by-id map`); }
+      (p.targets || []).forEach((t) => {
+        if (!regions.includes(t.region)) { badRegion++; bad(`${p.id}/${t.id}: region ${t.region} has no section on screen`); }
+        if (!t.searchUrl && !t.productUrl) bad(`${p.id}/${t.id}: no URL at all`);
+        if (!['generic', 'challenged'].includes(t.kind)) bad(`${p.id}/${t.id}: unknown kind ${t.kind}`);
+      });
+      if (!p.description || p.description.length < 40) bad(`${p.id}: description too thin for the vision prompt to use`);
+      if (!Array.isArray(p.sanePriceRange) || p.sanePriceRange[0] >= p.sanePriceRange[1]) bad(`${p.id}: sanePriceRange is not a range`);
+      products.SPEC_ROWS.forEach(([k, label]) => {
+        if (!p.specs || !p.specs[k]) { missingSpec++; bad(`${p.id}: spec "${label}" missing — the compare table would show a gap`); }
+      });
+    });
+    ok(`products: ${ps.length}, ${shops} shops total, ${dupes} id clashes, ${badRegion} stray regions`);
+    ok(`compare table: ${products.SPEC_ROWS.length} rows × ${ps.length} products, ${missingSpec} gaps`);
+
+    // The Groq roles must each resolve to something even with no catalogue.
+    const models = await import(load('core/groq/models.mjs'));
+    const roles = Object.values(models.Role);
+    ok(`groq roles: ${roles.length} (${roles.join(', ')})`);
+
+    require('node:fs').rmSync(out, { recursive: true, force: true });
+    finish();
+  })().catch((e) => { bad(`pass 2 could not run: ${e.message}`); finish(); });
 }
 
+function finish() {
 /* ---------------------------------------------------- 3  dead ends ------- */
 console.log('\nPASS 3  dead ends');
 {
@@ -170,3 +219,5 @@ try {
 console.log('\n' + '─'.repeat(60));
 console.log(problems === 0 ? 'GREEN — safe to push\n' : `RED — ${problems} problem(s)\n`);
 process.exit(problems ? 1 : 0);
+
+}

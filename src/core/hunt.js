@@ -1,50 +1,61 @@
-import { Stock, REGION_ORDER } from './types';
+import { Stock, REGION_ORDER, Tier } from './types';
 import { buildScrapers } from '../adapters';
+import { huntStore, Confidence } from './pipeline';
 
-// Concurrency. Thirteen shops at once is thirteen simultaneous TLS handshakes
-// on a phone radio and it makes every one of them slower. Five is measured to
-// finish a full sweep well inside the time it takes to read the screen.
-const POOL = 5;
+// One page at a time in the browser, because there is one browser. The fetch
+// tier is concurrent; the render tier cannot be, and that is fine — the fetch
+// tier settles the shops that can be settled cheaply.
+const FETCH_POOL = 5;
 
 /**
- * Run every enabled scraper concurrently, reporting each result the moment it
- * lands rather than at the end.
- *
- * @param {Object}   opts.overrides  pinned product URLs
- * @param {Set}      opts.disabled   store ids switched OFF (we store OFF, not ON —
- *                                   design-language.md §7 — so a shop added in a
- *                                   later build is live by default)
- * @param {Function} opts.onResult   called per store as it finishes
+ * Sweep every enabled shop for ONE product, reporting each result as it lands.
  */
-export async function hunt({ overrides = {}, disabled = new Set(), onResult } = {}) {
-  const scrapers = buildScrapers(overrides).filter((s) => !disabled.has(s.id));
+export async function hunt({ product, overrides = {}, disabled = new Set(), browser = null,
+                             visionEnabled = true, onResult, onStage } = {}) {
+  const scrapers = buildScrapers(product, overrides).filter((s) => !disabled.has(s.id));
   const results = [];
+
+  // Shops that need the browser are run in order; the rest go in a pool. The
+  // split is decided by asking the cheap question first, inside huntStore.
   let cursor = 0;
+  const queue = [];
 
   async function worker() {
     while (cursor < scrapers.length) {
       const s = scrapers[cursor++];
-      const r = await s.run();
-      results.push(r);
-      if (onResult) { try { onResult(r); } catch { /* the UI is not allowed to break a sweep */ } }
+      const r = await huntStore(s, product, null, { visionEnabled: false, onStage: () => {} });
+      if (r.tier === Tier.FETCH && r.confidence === Confidence.HIGH) {
+        results.push(r);
+        if (onResult) safely(onResult, r);
+      } else {
+        queue.push(s);                     // needs the real browser
+      }
     }
   }
+  await Promise.all(Array.from({ length: Math.min(FETCH_POOL, scrapers.length) }, worker));
 
-  await Promise.all(Array.from({ length: Math.min(POOL, scrapers.length) }, worker));
+  for (const s of queue) {
+    const r = await huntStore(s, product, browser, {
+      visionEnabled,
+      onStage: (stage) => onStage && onStage(s.id, stage),
+    });
+    results.push(r);
+    if (onResult) safely(onResult, r);
+  }
+
   return results;
 }
+
+const safely = (f, r) => { try { f(r); } catch { /* the UI is not allowed to break a sweep */ } };
 
 /* ------------------------------------------------------------- the ranking */
 
 export const isBuyable = (r) => r.status === Stock.IN_STOCK && typeof r.price === 'number';
 
 /**
- * The BEST DEAL.
- *
- * Aggregators are excluded on purpose. Geizhals and Nabava quote the cheapest
- * of several shops, so their number is by construction lower than or equal to
- * the shop it came from — leaving them in means the badge lands permanently on
- * a site that does not sell anything, and the badge stops meaning "buy this".
+ * BEST DEAL. Aggregators are excluded: they quote the cheapest of several
+ * shops, so their number is by construction lower than the shop it came from,
+ * and leaving them in parks the badge permanently on a site that sells nothing.
  */
 export function bestDeal(results) {
   const buyable = results.filter((r) => isBuyable(r) && !r.aggregator);
@@ -52,14 +63,8 @@ export function bestDeal(results) {
   return buyable.reduce((a, b) => (b.price < a.price ? b : a));
 }
 
-export const SortMode = {
-  REGION: 'REGION',     // Croatia first, then Germany, then the rest
-  CHEAPEST: 'CHEAPEST',  // lowest in-stock price anywhere, regardless of flag
-};
+export const SortMode = { REGION: 'REGION', CHEAPEST: 'CHEAPEST' };
 
-// Within a region, the order is: buyable and cheap, then pre-order, then
-// unknown, then out of stock, then blocked, then broken. A blocked shop sits
-// below an out-of-stock one because out-of-stock is an answer and blocked is not.
 const STATUS_RANK = {
   [Stock.IN_STOCK]: 0,
   [Stock.PREORDER]: 1,
@@ -92,27 +97,23 @@ export function sortResults(results, mode) {
 }
 
 export function groupByRegion(results) {
-  return REGION_ORDER.map((region) => ({
-    region,
-    rows: results.filter((r) => r.region === region),
-  }));
+  return REGION_ORDER.map((region) => ({ region, rows: results.filter((r) => r.region === region) }));
 }
 
 /**
- * Which stores just crossed from not-in-stock into in-stock.
+ * Which shops just crossed into stock, per product.
  *
- * The comparison is against the PREVIOUS status of that same store, so a shop
- * that has been in stock for a week does not re-announce itself on every sweep,
- * and the first sweep of a fresh install announces nothing at all — there was
- * no previous state, so nothing "changed", and a notification on launch would
- * be a lie about news.
+ * Compared against that shop's PREVIOUS status for THAT product, so a shop in
+ * stock all week does not re-announce itself, and a fresh install announces
+ * nothing at all — there was no previous state, so nothing changed, and a
+ * notification on launch would be a lie about news.
  */
 export function newlyInStock(previousById, results) {
   const out = [];
   for (const r of results) {
     if (r.status !== Stock.IN_STOCK) continue;
     const prev = previousById[r.id];
-    if (!prev || prev.status === Stock.PENDING) continue;   // nothing to compare
+    if (!prev || prev.status === Stock.PENDING) continue;
     if (prev.status !== Stock.IN_STOCK) out.push(r);
   }
   return out;
