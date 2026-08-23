@@ -91,7 +91,12 @@ jobs:
         run: |
           SRC=android/app/build/outputs/apk/release/app-release.apk
           test -f "$SRC" || { echo "no APK at $SRC"; find android/app/build/outputs -name '*.apk'; exit 1; }
-          OUT="${VERSION}-lenovo-hunter-v${VERSION}.apk"
+          # The name comes from src/version.js, not from a string typed here.
+          # v2 shipped as "2-lenovo-hunter-v2.apk" while version.js already said
+          # tablet-hunter, because this line held its own copy of the name — the
+          # exact drift versioning.md §6 exists to prevent, committed by the
+          # person who quoted §6 in the comment above it.
+          OUT=$(node -e "const s=require('fs').readFileSync('src/version.js','utf8');const V=s.match(/VERSION = (\d+)/)[1];const N=s.match(/APK_NAME = \`([^\`]+)\`/)[1];console.log(N.replace(/\\\$\{VERSION\}/g,V))")
           cp "$SRC" "$OUT"
           echo "path=$OUT" >> "$GITHUB_OUTPUT"
           ls -la "$OUT"

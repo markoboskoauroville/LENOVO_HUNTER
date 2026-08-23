@@ -61,6 +61,17 @@ console.log('PASS 1  structure');
   });
   ok(`assets: ${assets.length} declared, all present`);
 
+  // And the workflow must DERIVE that name rather than hold a copy of it.
+  // v2 shipped as 2-lenovo-hunter-v2.apk while version.js said tablet-hunter,
+  // because the YAML had its own string. A convention that depends on somebody
+  // typing it correctly survives until the first tired evening.
+  const wf = read('.github/workflows/build.yml');
+  if (/OUT="\$\{VERSION\}-[a-z-]+-v\$\{VERSION\}\.apk"/.test(wf)) {
+    bad('the workflow hardcodes the APK name — it must read it from src/version.js');
+  } else if (!wf.includes('APK_NAME')) {
+    bad('the workflow does not reference APK_NAME at all');
+  } else ok('apk name is derived from the version constant, not typed');
+
   if (!fs.existsSync(path.join(root, 'assets/alarm.wav'))) bad('assets/alarm.wav missing — the alert would be silent');
   else ok('alert tone present');
 
