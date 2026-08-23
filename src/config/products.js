@@ -24,30 +24,42 @@ export const PRODUCTS = [
     accent: '#F59E0B',
     // What the vision model is told to look for. Written as a person would
     // describe it to another person, because that is what it is read by.
+    // The naming around this tablet is a mess and it has already produced one
+    // wrong verdict. Measured 23.8.2026: Giztop's page titled "Lenovo Legion
+    // Y700 2025" is the Gen 4, and the vision model caught it — wrong_variant,
+    // "the page lists the Y700 Gen 4, not the requested Gen 3". Meanwhile
+    // GSMArena files the Gen 3 itself under "Y700 (2025)". So the year is
+    // useless as a discriminator and the CHIP is the thing that separates them.
     description:
-      'Lenovo Legion Tab Y700 Gen 3, model TB321FU, an 8.8 inch Android gaming ' +
-      'tablet with 12 GB RAM and 256 GB storage, Snapdragon 8s Gen 3.',
+      'Lenovo Legion Tab Y700 Gen 3, model TB321FU, also sold as "Legion Tab ' +
+      'Gen 3" and listed by some sites as "Legion Y700 (2025)". An 8.8 inch ' +
+      'Android gaming tablet, 1600x2560 IPS at 165Hz, Snapdragon 8 Gen 3, ' +
+      '12 GB RAM, 256 GB UFS 4.0, 6550 mAh, 68W, no microSD slot, 350 g. ' +
+      'IMPORTANT: the Legion Y700 Gen 4 is a DIFFERENT tablet — it has a ' +
+      'Snapdragon 8 Elite, a 7600 mAh battery and a microSD slot. If the page ' +
+      'shows Gen 4, or Snapdragon 8 Elite, or a microSD slot, that is ' +
+      'verdict "wrong_variant", not a match.',
     hints: ['Y700', 'TB321FU', 'TB321', 'Legion Tab'],
     // Anything outside this is a different configuration, a bundle, or a parse
     // that grabbed the wrong number.
     sanePriceRange: [280, 900],
     targets: legionTargets(),
     specs: {
-      screen: '8.8" LCD',
-      resolution: '2560 × 1600',
-      refresh: '144 Hz',
-      brightness: '~500 nits',
-      chip: 'Snapdragon 8s Gen 3',
-      ram: '12 GB (physical)',
-      storage: '256 GB UFS',
+      screen: '8.8" IPS LCD',
+      resolution: '1600 × 2560',
+      refresh: '165 Hz',
+      brightness: '500 nits (900 HBM)',
+      chip: 'Snapdragon 8 Gen 3',
+      ram: '12 GB LPDDR5X',
+      storage: '256 GB UFS 4.0',
       sdCard: 'no',
       battery: '6550 mAh',
       charging: '68 W',
-      speakers: '2 · JBL',
-      weight: '~350 g',
+      speakers: '2 · JBL · Dolby Vision',
+      weight: '350 g',
       os: 'Android 14 / ZUI',
-      extras: 'stylus support, best build of the three',
-      priceSeen: '€400 – €600 (import)',
+      extras: 'stylus, best build of the three · Gen 4 exists, is not this',
+      priceSeen: '~€550 (import)',
     },
   },
   {
@@ -194,7 +206,9 @@ function alldocubeTargets() {
     // The manufacturer's own shop and the importers. For this tablet these are
     // not a fallback, they are the main road.
     t('alldocube', 'ALLDOCUBE Store', Region.EU, 'https://www.alldocube.com/search?q=iPlay+70+mini+Ultra'),
-    t('giztop', 'Giztop', Region.EU, 'https://www.giztop.com/alldocube-iplay-70-mini-ultra.html'),
+    // VERIFIED 23.8.2026: rendered, photographed, and read as a match —
+    // "ALLDOCUBE iPLAY 70 MINI ULTRA", €349, in stock, in 5.5 seconds.
+    t('giztop', 'Giztop', Region.EU, 'https://www.giztop.com/alldocube-iplay-70-mini-ultra.html', { pinned: true }),
     t('proshop', 'Proshop', Region.EU, 'https://www.proshop.de/?s=alldocube+iplay+70'),
     t('aliexpress', 'AliExpress', Region.EU, 'https://www.aliexpress.com/w/wholesale-alldocube-iplay-70-mini-ultra.html', { challenged: 'heavy bot protection' }),
   ];
@@ -226,7 +240,9 @@ function ultrapadTargets() {
 function t(id, name, region, searchUrl, opts = {}) {
   return {
     id, name, region, searchUrl,
-    productUrl: null,                       // pinned by hand, always preferred
+    // `pinned` means this URL IS the product page, verified by eye, so the
+    // fetch tier is allowed to settle it without the browser and the camera.
+    productUrl: opts.pinned ? searchUrl : null,
     aggregator: !!opts.aggregator,
     kind: opts.challenged ? 'challenged' : 'generic',
     knownHard: opts.challenged || null,

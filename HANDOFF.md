@@ -120,6 +120,37 @@ stock. The check was wrong, not the code. Both are recorded in `verify.js` where
    than migrated, so a v1 install loses its pinned URLs and its OFF list. That is a deliberate,
    one-time cost and it is the thing to check first on a device that had v1.
 
+## The Legion naming mess, and what it cost to find
+
+Measured 23.8.2026, by rendering the pages and looking at them:
+
+- Giztop's page titled **"Lenovo Legion Y700 2025"** is the **Gen 4**.
+- GSMArena files the **Gen 3** under **"Y700 (2025)"**.
+
+So the year in a listing is worthless as a discriminator, and a hunter keyed on "Y700 2025" buys the
+wrong tablet. What separates them is the silicon: Gen 3 is **Snapdragon 8 Gen 3, 6550 mAh, no
+microSD**; Gen 4 is **Snapdragon 8 Elite, 7600 mAh, microSD**. That is now written into the Legion's
+prompt as an explicit rule, and it holds — both Giztop pages come back **wrong_variant**, each naming
+the chip in its reason:
+
+```
+Giztop "Y700 2025"  wrong_variant  saw: Lenovo Legion Y700 2025 (Y700 Gen 4)
+Giztop "Y700 G4"    wrong_variant  saw: LENOVO LEGION Y700 GEN 4
+```
+
+**Two errors in my own spec sheet came out of the same check** and are corrected: the Gen 3 is
+**165 Hz**, not 144, and **Snapdragon 8 Gen 3**, not 8s Gen 3. Both were written from memory. The
+compare table is only worth having if it is right, so it is now sourced from the measurement.
+
+## The APK name drifted, under a comment forbidding it
+
+v2 published as `2-lenovo-hunter-v2.apk` while `src/version.js` already said `tablet-hunter`, because
+the workflow held **its own copy of the name** — directly beneath a comment citing versioning.md §6,
+*the build produces the name; hands do not*. Quoting the rule is not following it.
+
+The build step now reads `APK_NAME` from the constant, `verify` fails if the YAML ever hardcodes it
+again, and the corrected artefact is published as **`2-tablet-hunter-v2.apk`**.
+
 ## What is still untested
 
 - **The WebView screenshot path has never run on a device.** `react-native-view-shot` capturing a
